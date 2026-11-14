@@ -16,10 +16,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Lets the whole project be uploaded to the repo as a single LarpMusic.zip
-      # (handy when adding files through the GitHub website, where a folder can't be
-      # selected in the upload dialog). If the project was instead committed as real
-      # files/folders, LarpMusic.zip won't exist and this step is skipped harmlessly.
       - name: Unzip project if it was uploaded as LarpMusic.zip
         run: |
           if [ -f "LarpMusic.zip" ]; then
@@ -50,8 +46,6 @@ jobs:
             echo "JAMENDO_CLIENT_ID=${{ secrets.JAMENDO_CLIENT_ID }}" >> local.properties
           fi
 
-      # Builds without relying on a committed gradle-wrapper.jar binary:
-      # the setup-gradle action above provides a working `gradle` command directly.
       - name: Assemble debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
         env:
@@ -64,15 +58,22 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # Release APK is built and uploaded only when signing secrets are present,
-      # so a fork or a repo without a keystore still gets a usable debug build.
+      - name: Check whether release signing secrets are configured
+        id: release_secrets
+        run: |
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Decode release keystore
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        if: steps.release_secrets.outputs.configured == 'true'
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
 
       - name: Assemble release APK
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        if: steps.release_secrets.outputs.configured == 'true'
         run: gradle assembleRelease --no-daemon --stacktrace
         env:
           JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
@@ -82,7 +83,7 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: Upload release APK
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        if: steps.release_secrets.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: larpmusic-release-apk
